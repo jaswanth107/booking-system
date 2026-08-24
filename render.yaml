@@ -9,7 +9,7 @@
 services:
   - type: web
     name: booking-backend
-    runtime: node
+    env: node
     plan: starter
     rootDir: backend
     buildCommand: npm install && npm run build
