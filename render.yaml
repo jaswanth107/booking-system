@@ -1,0 +1,26 @@
+# Render "Blueprint" — connect this repo in the Render dashboard
+# (New + -> Blueprint) and it reads this file automatically.
+#
+# NOTE: persistent disks require a paid instance type ("starter" or above) —
+# Render's free tier does not support attaching a disk. On the free tier,
+# remove the `disk:` block below; the SQLite file will still work, but it
+# resets whenever the instance restarts/redeploys/spins down from idling
+# (data is not durable). See DEPLOY.md for details.
+services:
+  - type: web
+    name: booking-backend
+    runtime: node
+    plan: starter
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DB_PATH
+        value: /var/data/data.sqlite
+      - key: CORS_ORIGIN
+        sync: false # set to your Vercel frontend URL after it's deployed
+    disk:
+      name: booking-data
+      mountPath: /var/data
+      sizeGB: 1
