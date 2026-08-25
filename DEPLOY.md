@@ -18,16 +18,17 @@ git push -u origin master
 
 ## 2. Backend → Render
 
+`render.yaml` is set to the **free** plan — no card required, no persistent disk. That means
+booking/user data resets whenever the instance restarts, redeploys, or spins down from 15 min
+of inactivity (free instances sleep when idle). Fine for a demo; upgrade to `starter` + add a
+`disk:` block in `render.yaml` later if you need real persistence.
+
 1. Go to https://dashboard.render.com → **New +** → **Blueprint**.
-2. Connect your GitHub account and select this repo. Render reads `render.yaml` automatically.
-3. Review the plan: the Blueprint requests the **Starter** plan because persistent disks
-   (needed so the SQLite file survives restarts) aren't available on Render's free tier.
-   - If you want to stay free for now: edit the service after creation, remove the disk, and
-     accept that booking/user data resets whenever the instance restarts or spins down from
-     idling (Render free instances sleep after 15 min of inactivity).
-4. Click **Apply**. Wait for the build (`npm install && npm run build`) and deploy to finish.
-5. Copy the resulting URL, e.g. `https://booking-backend.onrender.com`.
-6. Sanity check: `curl https://booking-backend.onrender.com/api/health` → `{"ok":true}`.
+2. Connect your GitHub account and select this repo. Render reads `render.yaml` automatically —
+   confirm the preview shows **Environment: Node**, **Plan: Free**.
+3. Click **Apply**. Wait for the build (`npm install && npm run build`) and deploy to finish.
+4. Copy the resulting URL, e.g. `https://booking-backend.onrender.com`.
+5. Sanity check: `curl https://booking-backend.onrender.com/api/health` → `{"ok":true}`.
 
 ## 3. Frontend → Vercel
 
@@ -67,6 +68,8 @@ Open the Vercel URL, sign up a fresh account, book a room, confirm it shows up i
 
 - The Render free tier's cold start (after idling) can take 30-60s for the first request —
   don't mistake that for a bug if the first sign-up/login feels slow.
-- `DB_PATH` is set by `render.yaml` to `/var/data/data.sqlite`, inside the mounted disk.
+- On the free plan, `DB_PATH` is unset and defaults to a file next to the built app
+  (ephemeral — see the note in `render.yaml`). Every redeploy/restart/spin-down means everyone
+  has to sign up again and rebooking from scratch. That's expected on free, not a bug.
 - Nothing in this repo talks to a third-party auth provider — signup/login is fully self-hosted
   (see README.md "Authentication").

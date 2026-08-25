@@ -1,26 +1,25 @@
 # Render "Blueprint" — connect this repo in the Render dashboard
 # (New + -> Blueprint) and it reads this file automatically.
 #
-# NOTE: persistent disks require a paid instance type ("starter" or above) —
-# Render's free tier does not support attaching a disk. On the free tier,
-# remove the `disk:` block below; the SQLite file will still work, but it
-# resets whenever the instance restarts/redeploys/spins down from idling
-# (data is not durable). See DEPLOY.md for details.
+# Free tier: no persistent disk (not supported on free instances), so
+# DB_PATH lives in the container's own ephemeral filesystem. That means
+# booking/user data resets whenever the instance restarts, redeploys, or
+# spins down from 15 min of inactivity (free instances sleep when idle).
+# Fine for a demo; for real persistence, switch `plan` to `starter` and
+# add a `disk:` block (see git history of this file, or DEPLOY.md) once
+# you're ready to pay for it.
 services:
   - type: web
     name: booking-backend
     env: node
-    plan: starter
+    plan: free
     rootDir: backend
     buildCommand: npm install && npm run build
     startCommand: npm run start
     healthCheckPath: /api/health
     envVars:
-      - key: DB_PATH
-        value: /var/data/data.sqlite
+      # No DB_PATH override — defaults to a file next to the built app
+      # (backend/data.sqlite), which always resolves correctly regardless
+      # of the host's working directory.
       - key: CORS_ORIGIN
         sync: false # set to your Vercel frontend URL after it's deployed
-    disk:
-      name: booking-data
-      mountPath: /var/data
-      sizeGB: 1
