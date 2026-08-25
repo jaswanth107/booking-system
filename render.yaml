@@ -18,6 +18,13 @@ services:
     startCommand: npm run start
     healthCheckPath: /api/health
     envVars:
+      # Pin Node explicitly: this app needs Node >=22.5 for the built-in
+      # node:sqlite module. Render's default version (if unpinned) may be
+      # older and would crash the app on boot with "Cannot find module
+      # 'node:sqlite'". backend/.node-version pins the same version, but
+      # setting it here too is belt-and-suspenders for Blueprint deploys.
+      - key: NODE_VERSION
+        value: 24.15.0
       # No DB_PATH override — defaults to a file next to the built app
       # (backend/data.sqlite), which always resolves correctly regardless
       # of the host's working directory.
