@@ -76,8 +76,9 @@ export function BookingPage() {
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
-        setErrorIsSlotTaken(err.code === "SLOT_TAKEN");
-        if (err.code === "SLOT_TAKEN") setAvailability("unavailable");
+        const takenLike = err.code === "SLOT_TAKEN" || err.code === "RESOURCE_UNAVAILABLE";
+        setErrorIsSlotTaken(takenLike);
+        if (takenLike) setAvailability("unavailable");
       } else {
         setError("Something went wrong. Please try again.");
       }
@@ -105,7 +106,10 @@ export function BookingPage() {
     return (
       <section className="confirmation" data-testid="booking-confirmation">
         <h1>Booking confirmed</h1>
+        <p className="notice notice-success">Booking confirmed successfully.</p>
         <dl>
+          <dt>Booking ID</dt>
+          <dd>{confirmed.bookingRef}</dd>
           <dt>Resource</dt>
           <dd>{resource.name}</dd>
           <dt>Date</dt>
@@ -130,7 +134,8 @@ export function BookingPage() {
     <section>
       <h1 data-testid="resource-name">Book: {resource.name}</h1>
       <p className="resource-meta">
-        {resource.location} · Capacity {resource.capacity}
+        {resource.location}
+        {resource.capacity !== null ? ` · Capacity ${resource.capacity}` : ""}
       </p>
 
       <form className="booking-form" onSubmit={handleSubmit}>

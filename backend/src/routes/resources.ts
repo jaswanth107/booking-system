@@ -1,14 +1,23 @@
 import { Router } from "express";
 import type { DatabaseSync } from "node:sqlite";
-import { checkAvailability, getResourceById, listResources } from "../services/bookingService.js";
+import { checkAvailability } from "../services/bookingService.js";
+import { getResourceById, listResources } from "../services/resourceService.js";
 import { Errors } from "../services/errors.js";
 import { parseTimestamp } from "../utils/time.js";
 
 export function resourcesRouter(db: DatabaseSync): Router {
   const router = Router();
 
-  router.get("/", (_req, res) => {
-    res.json({ resources: listResources(db) });
+  router.get("/", (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : undefined;
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const minCapacity = req.query.minCapacity ? Number(req.query.minCapacity) : undefined;
+    const facilities =
+      typeof req.query.facilities === "string" && req.query.facilities.length
+        ? req.query.facilities.split(",").map((f) => f.trim()).filter(Boolean)
+        : undefined;
+
+    res.json({ resources: listResources(db, { q, status, minCapacity, facilities }) });
   });
 
   router.get("/:id", (req, res, next) => {
@@ -36,7 +45,7 @@ export function resourcesRouter(db: DatabaseSync): Router {
       }
 
       const result = checkAvailability(db, resource.id, startAt, endAt);
-      res.json({ ...result, advisory: true });
+      res.json({ ...result, advisory: true, resourceStatus: resource.status });
     } catch (err) {
       next(err);
     }

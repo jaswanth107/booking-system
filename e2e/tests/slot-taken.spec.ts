@@ -28,6 +28,7 @@ async function signUp(page: Page, name: string, email: string, password: string)
   await page.getByTestId("name-input").fill(name);
   await page.getByTestId("email-input").fill(email);
   await page.getByTestId("password-input").fill(password);
+  await page.getByTestId("confirm-password-input").fill(password);
   await page.getByTestId("auth-submit").click();
   await expect(page.getByTestId("current-user-name")).toHaveText(name);
 }

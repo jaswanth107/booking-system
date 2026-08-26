@@ -34,5 +34,26 @@ export const Errors = {
   invalidCredentials: () =>
     new AppError(401, "INVALID_CREDENTIALS", "Email or password is incorrect."),
   weakPassword: () =>
-    new AppError(400, "WEAK_PASSWORD", "Password must be at least 8 characters long.")
+    new AppError(400, "WEAK_PASSWORD", "Password must be at least 8 characters long."),
+  forbidden: (message = "You do not have permission to do that.") => new AppError(403, "FORBIDDEN", message),
+  accountInactive: () =>
+    new AppError(403, "ACCOUNT_INACTIVE", "This account has been deactivated. Contact an administrator."),
+  invalidOrExpiredToken: () =>
+    new AppError(400, "INVALID_OR_EXPIRED_TOKEN", "This reset link is invalid or has expired."),
+  passwordMismatch: () => new AppError(400, "PASSWORD_MISMATCH", "Passwords do not match."),
+  incorrectPassword: () => new AppError(400, "INCORRECT_PASSWORD", "Current password is incorrect."),
+  resourceUnavailable: (status: string) =>
+    new AppError(
+      409,
+      "RESOURCE_UNAVAILABLE",
+      status === "MAINTENANCE"
+        ? "This resource is currently under maintenance and cannot be booked."
+        : "This resource is currently unavailable."
+    ),
+  resourceHasBookings: () =>
+    new AppError(
+      409,
+      "RESOURCE_HAS_BOOKINGS",
+      "This resource has existing bookings and cannot be deleted. Disable it instead."
+    )
 };

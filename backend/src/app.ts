@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { resourcesRouter } from "./routes/resources.js";
 import { bookingsRouter } from "./routes/bookings.js";
 import { authRouter } from "./routes/auth.js";
+import { adminRouter } from "./routes/admin.js";
 import { AppError } from "./services/errors.js";
 
 export function createApp(db: DatabaseSync): Express {
@@ -21,6 +22,7 @@ export function createApp(db: DatabaseSync): Express {
   app.use("/api/resources", resourcesRouter(db));
   app.use("/api/bookings", bookingsRouter(db));
   app.use("/api/auth", authRouter(db));
+  app.use("/api/admin", adminRouter(db));
 
   app.use((req, res) => {
     res.status(404).json({ error: "NOT_FOUND", message: `No route for ${req.method} ${req.path}` });

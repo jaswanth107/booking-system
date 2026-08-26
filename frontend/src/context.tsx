@@ -7,8 +7,9 @@ interface AppContextValue {
   user: User | null;
   authChecked: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (name: string, email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, password: string, confirmPassword: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
   timeZone: string;
   setTimeZone: (tz: string) => void;
 }
@@ -43,8 +44,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUser(user);
   }
 
-  async function signup(name: string, email: string, password: string) {
-    const { user, token } = await api.signup(name, email, password);
+  async function signup(name: string, email: string, password: string, confirmPassword: string) {
+    const { user, token } = await api.signup(name, email, password, confirmPassword);
     setToken(token);
     setUser(user);
   }
@@ -55,13 +56,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
+  async function refreshUser() {
+    const { user } = await api.me();
+    setUser(user);
+  }
+
   function setTimeZone(tz: string) {
     localStorage.setItem("booking-system:timeZone", tz);
     setTimeZoneState(tz);
   }
 
   return (
-    <AppContext.Provider value={{ user, authChecked, login, signup, logout, timeZone, setTimeZone }}>
+    <AppContext.Provider value={{ user, authChecked, login, signup, logout, refreshUser, timeZone, setTimeZone }}>
       {children}
     </AppContext.Provider>
   );

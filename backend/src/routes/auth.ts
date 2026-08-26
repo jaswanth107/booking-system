@@ -1,6 +1,14 @@
 import { Router } from "express";
 import type { DatabaseSync } from "node:sqlite";
-import { getPublicUserById, login, logout, signup } from "../services/authService.js";
+import {
+  changePassword,
+  getPublicUserById,
+  login,
+  logout,
+  requestPasswordReset,
+  resetPassword,
+  signup
+} from "../services/authService.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 
 export function authRouter(db: DatabaseSync): Router {
@@ -8,8 +16,8 @@ export function authRouter(db: DatabaseSync): Router {
 
   router.post("/signup", async (req, res, next) => {
     try {
-      const { name, email, password } = req.body ?? {};
-      const result = await signup(db, { name, email, password });
+      const { name, email, password, confirmPassword } = req.body ?? {};
+      const result = await signup(db, { name, email, password, confirmPassword });
       res.status(201).json(result);
     } catch (err) {
       next(err);
@@ -41,6 +49,43 @@ export function authRouter(db: DatabaseSync): Router {
     try {
       const user = getPublicUserById(db, (req as AuthedRequest).userId);
       res.json({ user });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Reusable for both a normal "change my password" action and the forced
+  // first-login change for the default admin (passwordChangeRequired flag).
+  router.post("/change-password", requireAuth(db), async (req, res, next) => {
+    try {
+      const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
+      const user = await changePassword(db, (req as AuthedRequest).userId, {
+        currentPassword,
+        newPassword,
+        confirmPassword
+      });
+      res.json({ user });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Always the same response regardless of whether the email exists, to
+  // avoid leaking account existence. See authService.requestPasswordReset.
+  router.post("/forgot-password", async (req, res, next) => {
+    try {
+      await requestPasswordReset(db, req.body?.email);
+      res.json({ message: "If that email is registered, a password reset link has been sent." });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/reset-password", async (req, res, next) => {
+    try {
+      const { token, newPassword, confirmPassword } = req.body ?? {};
+      await resetPassword(db, { token, newPassword, confirmPassword });
+      res.json({ message: "Password has been reset. You can now log in." });
     } catch (err) {
       next(err);
     }

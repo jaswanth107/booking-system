@@ -1,8 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { v4 as uuidv4 } from "uuid";
-import type { Booking, BookingStatus, Resource } from "../types.js";
+import type { Booking } from "../types.js";
 import { Errors } from "./errors.js";
 import { CANCELLATION_CUTOFF_MS, parseTimestamp, toUtcIso } from "../utils/time.js";
+import { getResourceById } from "./resourceService.js";
+import { logAction } from "./auditLog.js";
 
 export interface CreateBookingInput {
   resourceId: unknown;
@@ -11,9 +13,7 @@ export interface CreateBookingInput {
   endAt: unknown;
 }
 
-type BookingRow = Booking;
-
-function rowToBooking(row: BookingRow): Booking {
+function rowToBooking(row: Booking): Booking {
   return row;
 }
 
@@ -39,16 +39,20 @@ function withImmediateTransaction<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
-export function getResourceById(db: DatabaseSync, id: string): Resource | undefined {
-  return db.prepare("SELECT * FROM resources WHERE id = ?").get(id) as Resource | undefined;
-}
-
-export function listResources(db: DatabaseSync): Resource[] {
-  return db.prepare("SELECT * FROM resources ORDER BY name ASC").all() as unknown as Resource[];
+/** Human-friendly sequential booking reference, e.g. BK-2026-000001. Must be
+ * called inside the same BEGIN IMMEDIATE transaction as the insert it's for,
+ * so the increment is race-free under the same lock as the overlap check. */
+function nextBookingRef(db: DatabaseSync, now: Date): string {
+  const year = now.getUTCFullYear();
+  db.prepare("INSERT OR IGNORE INTO booking_counters (year, seq) VALUES (?, 0)").run(year);
+  const row = db.prepare("SELECT seq FROM booking_counters WHERE year = ?").get(year) as { seq: number };
+  const seq = row.seq + 1;
+  db.prepare("UPDATE booking_counters SET seq = ? WHERE year = ?").run(seq, year);
+  return `BK-${year}-${String(seq).padStart(6, "0")}`;
 }
 
 export function getBookingById(db: DatabaseSync, id: string): Booking | undefined {
-  const row = db.prepare("SELECT * FROM bookings WHERE id = ?").get(id) as BookingRow | undefined;
+  const row = db.prepare("SELECT * FROM bookings WHERE id = ?").get(id) as Booking | undefined;
   return row ? rowToBooking(row) : undefined;
 }
 
@@ -69,8 +73,61 @@ export function listBookings(
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = db
     .prepare(`SELECT * FROM bookings ${where} ORDER BY startAt DESC`)
-    .all(params) as unknown as BookingRow[];
+    .all(params) as unknown as Booking[];
   return rows.map(rowToBooking);
+}
+
+/**
+ * Admin view: every booking, joined with the user/resource names needed for
+ * "who booked what, when" without N+1 lookups. Supports optional filters.
+ */
+export interface AdminBookingRow extends Booking {
+  userName: string;
+  userEmail: string;
+  resourceName: string;
+}
+
+export function listBookingsForAdmin(
+  db: DatabaseSync,
+  filters: { q?: string; date?: string; resourceId?: string; status?: string; userId?: string } = {}
+): AdminBookingRow[] {
+  const clauses: string[] = [];
+  const params: Record<string, string> = {};
+
+  if (filters.q) {
+    clauses.push(
+      "(users.name LIKE @q OR users.email LIKE @q OR bookings.bookingRef LIKE @q OR resources.name LIKE @q)"
+    );
+    params.q = `%${filters.q}%`;
+  }
+  if (filters.date) {
+    clauses.push("date(bookings.startAt) = @date");
+    params.date = filters.date;
+  }
+  if (filters.resourceId) {
+    clauses.push("bookings.resourceId = @resourceId");
+    params.resourceId = filters.resourceId;
+  }
+  if (filters.status) {
+    clauses.push("bookings.status = @status");
+    params.status = filters.status;
+  }
+  if (filters.userId) {
+    clauses.push("bookings.userId = @userId");
+    params.userId = filters.userId;
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return db
+    .prepare(
+      `SELECT bookings.*, users.name as userName, users.email as userEmail, resources.name as resourceName
+       FROM bookings
+       JOIN users ON users.id = bookings.userId
+       JOIN resources ON resources.id = bookings.resourceId
+       ${where}
+       ORDER BY bookings.startAt DESC`
+    )
+    .all(params) as unknown as AdminBookingRow[];
 }
 
 /**
@@ -83,6 +140,9 @@ export function checkAvailability(
   startAt: Date,
   endAt: Date
 ): { available: boolean } {
+  const resource = getResourceById(db, resourceId);
+  if (resource && resource.status !== "AVAILABLE") return { available: false };
+
   const conflict = db
     .prepare(
       `SELECT id FROM bookings
@@ -122,7 +182,12 @@ function validateCreateInput(
 
   const resource = getResourceById(db, resourceId);
   if (!resource) throw Errors.notFound("Resource");
+  if (resource.status !== "AVAILABLE") throw Errors.resourceUnavailable(resource.status);
 
+  // The caller (route layer) only ever supplies a userId that came from a
+  // verified, currently-active session (see middleware/auth.ts), so an
+  // inactive/unknown user can't reach this point — this is just belt-and-
+  // suspenders against a bad internal caller, not the primary enforcement.
   const user = db.prepare("SELECT id FROM users WHERE id = ?").get(userId);
   if (!user) throw Errors.unauthorized();
 
@@ -163,48 +228,59 @@ export function createBooking(
     }
 
     const id = uuidv4();
+    const bookingRef = nextBookingRef(db, now);
     const createdAt = toUtcIso(now);
-    const status: BookingStatus = "CONFIRMED";
 
     db.prepare(
-      `INSERT INTO bookings (id, resourceId, userId, startAt, endAt, status, createdAt, cancelledAt)
-       VALUES (@id, @resourceId, @userId, @startAt, @endAt, @status, @createdAt, NULL)`
+      `INSERT INTO bookings (id, bookingRef, resourceId, userId, startAt, endAt, status, createdAt, cancelledAt, cancelledBy)
+       VALUES (@id, @bookingRef, @resourceId, @userId, @startAt, @endAt, 'CONFIRMED', @createdAt, NULL, NULL)`
     ).run({
       id,
+      bookingRef,
       resourceId,
       userId,
       startAt: toUtcIso(startAt),
       endAt: toUtcIso(endAt),
-      status,
       createdAt
     });
 
     return id;
   });
 
-  return getBookingById(db, bookingId)!;
+  const booking = getBookingById(db, bookingId)!;
+  logAction(db, {
+    actorId: userId,
+    action: "BOOKING_CREATED",
+    entityType: "booking",
+    entityId: booking.id,
+    details: { bookingRef: booking.bookingRef, resourceId, startAt: booking.startAt, endAt: booking.endAt }
+  });
+  return booking;
 }
 
-export function cancelBooking(
+function cancelBookingInternal(
   db: DatabaseSync,
   bookingId: string,
-  userId: string,
-  now: Date = new Date()
+  now: Date,
+  opts: { userId?: string; enforceOwnership: boolean; enforceCutoff: boolean; cancelledBy: string }
 ): Booking {
   const id = withImmediateTransaction(db, () => {
     const booking = getBookingById(db, bookingId);
     if (!booking) throw Errors.notFound("Booking");
-    if (booking.userId !== userId) throw Errors.notFound("Booking");
+    if (opts.enforceOwnership && booking.userId !== opts.userId) throw Errors.notFound("Booking");
     if (booking.status === "CANCELLED") throw Errors.alreadyCancelled();
 
-    const startAt = new Date(booking.startAt);
-    const msUntilStart = startAt.getTime() - now.getTime();
-    if (msUntilStart < CANCELLATION_CUTOFF_MS) {
-      throw Errors.cancellationWindowClosed();
+    if (opts.enforceCutoff) {
+      const startAt = new Date(booking.startAt);
+      const msUntilStart = startAt.getTime() - now.getTime();
+      if (msUntilStart < CANCELLATION_CUTOFF_MS) {
+        throw Errors.cancellationWindowClosed();
+      }
     }
 
-    db.prepare(`UPDATE bookings SET status = 'CANCELLED', cancelledAt = ? WHERE id = ?`).run(
+    db.prepare(`UPDATE bookings SET status = 'CANCELLED', cancelledAt = ?, cancelledBy = ? WHERE id = ?`).run(
       toUtcIso(now),
+      opts.cancelledBy,
       bookingId
     );
 
@@ -212,4 +288,40 @@ export function cancelBooking(
   });
 
   return getBookingById(db, id)!;
+}
+
+/** A user cancelling their own booking: ownership + the 1-minute cutoff are both enforced. */
+export function cancelBooking(db: DatabaseSync, bookingId: string, userId: string, now: Date = new Date()): Booking {
+  const booking = cancelBookingInternal(db, bookingId, now, {
+    userId,
+    enforceOwnership: true,
+    enforceCutoff: true,
+    cancelledBy: userId
+  });
+  logAction(db, {
+    actorId: userId,
+    action: "BOOKING_CANCELLED",
+    entityType: "booking",
+    entityId: booking.id,
+    details: { bookingRef: booking.bookingRef }
+  });
+  return booking;
+}
+
+/** Admin override: any booking, any time (including past the cutoff) — the
+ * confirmation dialog and audit trail live at the route/UI layer. */
+export function adminCancelBooking(db: DatabaseSync, bookingId: string, adminUserId: string, now: Date = new Date()): Booking {
+  const booking = cancelBookingInternal(db, bookingId, now, {
+    enforceOwnership: false,
+    enforceCutoff: false,
+    cancelledBy: `ADMIN:${adminUserId}`
+  });
+  logAction(db, {
+    actorId: adminUserId,
+    action: "ADMIN_BOOKING_CANCELLED",
+    entityType: "booking",
+    entityId: booking.id,
+    details: { bookingRef: booking.bookingRef, originalUserId: booking.userId }
+  });
+  return booking;
 }

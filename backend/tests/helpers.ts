@@ -20,13 +20,20 @@ export function teardownTestDb(db: DatabaseSync, dbPath: string) {
   }
 }
 
-export function seedUser(db: DatabaseSync, overrides: Partial<{ name: string; email: string }> = {}) {
+export function seedUser(
+  db: DatabaseSync,
+  overrides: Partial<{ name: string; email: string; role: "USER" | "ADMIN"; status: "ACTIVE" | "INACTIVE" }> = {}
+) {
   const id = uuidv4();
-  db.prepare("INSERT INTO users (id, name, email, passwordHash, createdAt) VALUES (?, ?, ?, ?, ?)").run(
+  db.prepare(
+    "INSERT INTO users (id, name, email, passwordHash, role, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(
     id,
     overrides.name ?? "Test User",
     overrides.email ?? `${id}@example.com`,
     "unused-in-tests", // tests authenticate via seedSession(), never via real login
+    overrides.role ?? "USER",
+    overrides.status ?? "ACTIVE",
     new Date().toISOString()
   );
   return id;
@@ -36,10 +43,13 @@ export function seedUser(db: DatabaseSync, overrides: Partial<{ name: string; em
  * authenticate as a given seeded user without going through the real password flow. */
 export function seedSession(db: DatabaseSync, userId: string): string {
   const token = uuidv4();
-  db.prepare("INSERT INTO sessions (token, userId, createdAt) VALUES (?, ?, ?)").run(
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  db.prepare("INSERT INTO sessions (token, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)").run(
     token,
     userId,
-    new Date().toISOString()
+    expiresAt.toISOString(),
+    now.toISOString()
   );
   return token;
 }
@@ -48,11 +58,23 @@ export function authHeader(token: string): [string, string] {
   return ["Authorization", `Bearer ${token}`];
 }
 
-export function seedResource(db: DatabaseSync, overrides: Partial<{ name: string; capacity: number }> = {}) {
+export function seedResource(
+  db: DatabaseSync,
+  overrides: Partial<{ name: string; capacity: number; status: "AVAILABLE" | "MAINTENANCE" | "DISABLED" }> = {}
+) {
   const id = uuidv4();
   db.prepare(
-    "INSERT INTO resources (id, name, description, location, capacity, createdAt) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, overrides.name ?? "Test Room", "desc", "loc", overrides.capacity ?? 4, new Date().toISOString());
+    "INSERT INTO resources (id, name, description, location, bestForUse, capacity, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    id,
+    overrides.name ?? "Test Room",
+    "desc",
+    "loc",
+    "testing",
+    overrides.capacity ?? 4,
+    overrides.status ?? "AVAILABLE",
+    new Date().toISOString()
+  );
   return id;
 }
 

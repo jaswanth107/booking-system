@@ -5,8 +5,10 @@ import { formatInTimeZone } from "../utils/timezone";
 import { useApp } from "../context";
 
 const CANCELLATION_CUTOFF_MS = 60 * 1000;
+const REMINDER_WINDOW_MS = 30 * 60 * 1000;
 
-type Tab = "upcoming" | "past" | "cancelled";
+type Tab = "upcoming" | "completed" | "cancelled";
+const TAB_LABEL: Record<Tab, string> = { upcoming: "Upcoming", completed: "Completed", cancelled: "Cancelled" };
 
 export function MyBookings() {
   const { timeZone } = useApp();
@@ -31,17 +33,25 @@ export function MyBookings() {
   useEffect(load, []);
 
   const grouped = useMemo(() => {
-    if (!bookings) return { upcoming: [], past: [], cancelled: [] as Booking[] };
+    if (!bookings) return { upcoming: [], completed: [], cancelled: [] as Booking[] };
     const upcoming: Booking[] = [];
-    const past: Booking[] = [];
+    const completed: Booking[] = [];
     const cancelled: Booking[] = [];
     for (const b of bookings) {
       if (b.status === "CANCELLED") cancelled.push(b);
-      else if (new Date(b.endAt).getTime() < now) past.push(b);
+      else if (new Date(b.endAt).getTime() < now) completed.push(b);
       else upcoming.push(b);
     }
-    return { upcoming, past, cancelled };
+    return { upcoming, completed, cancelled };
   }, [bookings, now]);
+
+  const soonest = useMemo(() => {
+    const next = grouped.upcoming
+      .map((b) => ({ b, msUntil: new Date(b.startAt).getTime() - now }))
+      .filter((x) => x.msUntil > 0 && x.msUntil <= REMINDER_WINDOW_MS)
+      .sort((a, c) => a.msUntil - c.msUntil)[0];
+    return next;
+  }, [grouped.upcoming, now]);
 
   async function handleCancel(id: string) {
     setBusyId(id);
@@ -63,15 +73,23 @@ export function MyBookings() {
   return (
     <section>
       <h1>My bookings</h1>
+
+      {soonest && (
+        <p className="notice notice-warning" data-testid="upcoming-reminder">
+          Your booking ({soonest.b.bookingRef}) starts in {Math.ceil(soonest.msUntil / 60_000)} minute
+          {Math.ceil(soonest.msUntil / 60_000) === 1 ? "" : "s"}.
+        </p>
+      )}
+
       <div className="tabs">
-        {(["upcoming", "past", "cancelled"] as Tab[]).map((t) => (
+        {(["upcoming", "completed", "cancelled"] as Tab[]).map((t) => (
           <button
             key={t}
             className={`tab ${tab === t ? "tab-active" : ""}`}
             onClick={() => setTab(t)}
             data-testid={`tab-${t}`}
           >
-            {t[0].toUpperCase() + t.slice(1)} ({grouped[t].length})
+            {TAB_LABEL[t]} ({grouped[t].length})
           </button>
         ))}
       </div>
@@ -89,7 +107,9 @@ export function MyBookings() {
               <div>
                 <strong>{formatInTimeZone(b.startAt, timeZone)}</strong> —{" "}
                 {formatInTimeZone(b.endAt, timeZone)}
-                <div className="resource-meta">Status: {b.status}</div>
+                <div className="resource-meta">
+                  {b.bookingRef} · Status: {b.status}
+                </div>
               </div>
               {canCancel && (
                 <button

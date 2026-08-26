@@ -30,10 +30,13 @@ npm run test:backend
 npm run e2e
 ```
 
-Open the app and you'll land on a login screen: pick **New user** to sign up with a name,
-email and password, or **Existing user** to log in with an email/password you already created.
-There are no pre-seeded accounts — everyone creates their own, and each user only ever sees
-and manages their own bookings.
+Open the app and you'll land on a login screen: pick **New user** to sign up with a name, email,
+and password (with confirmation), or **Existing user** to log in with an email/password you
+already created — there's also a "Forgot password?" link. Regular accounts aren't pre-seeded —
+everyone creates their own, and each user only ever sees and manages their own bookings. The
+one exception is a seeded **default admin account** (`admin@gmail.com` / `admin@password`) —
+log in with it and you'll immediately be forced to set a new password before doing anything
+else. See "Roles and the default admin account" below.
 
 ---
 
@@ -47,12 +50,22 @@ React UI  →  Express routes  →  Booking service (business rules)  →  SQLit
   talks to the API. Availability display and the "Slot taken" UX live here, but nothing about
   conflict *detection* does — the UI never decides whether a booking is allowed.
 - **`backend/src/routes/*.ts`** — thin HTTP layer: parse the request, call the service, map the
-  result/error to a status code. No business logic here.
-- **`backend/src/services/bookingService.ts`** — owns every business rule: input validation,
-  the overlap check, the transaction, the cancellation window. This is the single source of
-  truth and is exercised directly by the unit tests, not just through HTTP.
+  result/error to a status code. No business logic here. `admin.ts` mounts every admin endpoint
+  behind `requireAuth` + `requireAdmin`; `auth.ts` covers signup/login/logout/me/change-password/
+  forgot-password/reset-password.
+- **`backend/src/middleware/auth.ts`** — resolves a bearer token to a real, currently-active
+  user on every request (`requireAuth`), and separately enforces the `ADMIN` role
+  (`requireAdmin`) — backend-enforced authorization, never a frontend-only check.
+- **`backend/src/services/`** — owns every business rule, one file per concern:
+  `bookingService.ts` (overlap/concurrency/cancellation/booking references),
+  `authService.ts` (signup/login/sessions/password reset/the default admin),
+  `resourceService.ts` (resource CRUD/validation/status), `userAdminService.ts` (activate/
+  deactivate), `dashboardService.ts` (admin summary stats), `auditLog.ts`. These are the single
+  source of truth and are exercised directly by the unit tests, not just through HTTP.
 - **`backend/src/db/`** — schema + connection setup, using Node's built-in `node:sqlite`
-  module (no native build toolchain required — see "Why SQLite" below).
+  module (no native build toolchain required — see "Why SQLite" below). New columns for an
+  already-running database are added via small guarded `ALTER TABLE` migrations in
+  `db/index.ts`, so upgrading in place doesn't require wiping existing data.
 
 ## Booking conflict algorithm
 
@@ -211,16 +224,31 @@ the other user's info" asserts this directly). The booking page also offers a on
 
 ## API
 
-| Method | Path                              | Notes                                        |
-|--------|------------------------------------|-----------------------------------------------|
-| GET    | `/api/resources`                  | List resources                                |
-| GET    | `/api/resources/:id`              | Resource detail                               |
-| GET    | `/api/resources/:id/availability` | `?startAt&endAt` — advisory only              |
-| GET    | `/api/bookings`                   | Current user's bookings (`x-user-id` header)  |
-| POST   | `/api/bookings`                   | `{ resourceId, startAt, endAt }` → 201/400/404/409 |
-| GET    | `/api/bookings/:id`                | Single booking (must belong to caller)        |
-| POST   | `/api/bookings/:id/cancel`         | → 200, or 409 if the cancellation window has closed |
-| GET    | `/api/users`                      | Seeded demo users, for the "log in as" picker |
+| Method | Path                                | Notes                                              |
+|--------|--------------------------------------|-----------------------------------------------------|
+| GET    | `/api/resources`                    | List resources — `?q&status&minCapacity&facilities` |
+| GET    | `/api/resources/:id`                | Resource detail                                     |
+| GET    | `/api/resources/:id/availability`   | `?startAt&endAt` — advisory only                    |
+| GET    | `/api/bookings`                     | Current user's bookings                             |
+| POST   | `/api/bookings`                     | `{ resourceId, startAt, endAt }` → 201/400/404/409  |
+| GET    | `/api/bookings/:id`                 | Single booking (must belong to caller)              |
+| POST   | `/api/bookings/:id/cancel`          | → 200, or 409 if the cancellation window has closed |
+| POST   | `/api/auth/signup`                  | `{ name, email, password, confirmPassword }`        |
+| POST   | `/api/auth/login`                   | `{ email, password }`                               |
+| POST   | `/api/auth/logout`                  | Invalidates the current token                       |
+| GET    | `/api/auth/me`                      | Current user                                        |
+| POST   | `/api/auth/change-password`         | `{ currentPassword, newPassword, confirmPassword }` |
+| POST   | `/api/auth/forgot-password`         | `{ email }` — always the same generic response      |
+| POST   | `/api/auth/reset-password`          | `{ token, newPassword, confirmPassword }`           |
+| GET    | `/api/admin/dashboard`              | Summary counts — **ADMIN only**                     |
+| GET    | `/api/admin/users`                  | All users, no password hashes — **ADMIN only**      |
+| POST   | `/api/admin/users/:id/status`       | `{ status: ACTIVE\|INACTIVE }` — **ADMIN only**     |
+| GET    | `/api/admin/bookings`               | All bookings, joined — `?q&date&resourceId&status&userId` — **ADMIN only** |
+| GET    | `/api/admin/bookings/export.csv`    | Same filters, CSV download — **ADMIN only**         |
+| POST   | `/api/admin/bookings/:id/cancel`    | Cancels any booking, bypasses the cutoff — **ADMIN only** |
+| POST/PATCH/DELETE | `/api/admin/resources[/:id]` | Create/update/delete — **ADMIN only**              |
+| POST   | `/api/admin/resources/:id/status`   | `{ status: AVAILABLE\|MAINTENANCE\|DISABLED }` — **ADMIN only** |
+| GET    | `/api/admin/audit-logs`             | Recent admin-visible actions — **ADMIN only**       |
 
 Errors are always `{ "error": "CODE", "message": "human-readable text" }`. Unexpected
 exceptions are logged server-side and returned as a generic `500 INTERNAL_ERROR` — internal
@@ -230,33 +258,143 @@ details (stack traces, SQL) are never sent to the client.
 
 Real signup/login, no third-party auth provider:
 
-- `POST /api/auth/signup` — `{ name, email, password }`. Password must be at least 8
-  characters; email must be unique (`409 EMAIL_TAKEN` otherwise). The password is hashed with
-  Node's built-in `crypto.scrypt` (`backend/src/utils/password.ts`) — salted, one-way, never
-  stored or logged in plaintext.
+- `POST /api/auth/signup` — `{ name, email, password, confirmPassword }`. Password must be at
+  least 8 characters and match `confirmPassword`; email must be unique (`409 EMAIL_TAKEN`
+  otherwise) — normalized to lowercase before every lookup/insert, so `John@x.com` and
+  `john@x.com` collide as the same account. The password is hashed with Node's built-in
+  `crypto.scrypt` (`backend/src/utils/password.ts`) — salted, one-way, never stored or logged
+  in plaintext, and never returned to any client (`authService.ts` strips it before building
+  any response — see `backend/tests/integration/auth.api.test.ts`).
 - `POST /api/auth/login` — `{ email, password }`. A wrong password and an unknown email both
   return the identical `401 INVALID_CREDENTIALS`, so the API never reveals whether an account
-  exists for a given email (no user enumeration).
+  exists for a given email (no user enumeration). A deactivated account (see "Account status"
+  below) gets `403 ACCOUNT_INACTIVE` instead.
 - Both return `{ user, token }`. The frontend stores `token` in `localStorage` and sends it as
   `Authorization: Bearer <token>` on every subsequent request; `backend/src/middleware/auth.ts`
-  resolves that token to a real user id via the `sessions` table before any route handler runs.
-  **The server never trusts a client-supplied user id** — `userId` only ever comes from a
+  resolves that token to a real user id **and re-checks that user's current role/status** via
+  the `sessions` table before any route handler runs — not just at login time, so deactivating
+  a user mid-session immediately invalidates their existing token too.
+  **The server never trusts a client-supplied user id** — `userId` only ever comes from that
   verified session lookup, so you cannot act as another user by guessing or sending their id.
-- `GET /api/auth/me` restores the session after a page reload; `POST /api/auth/logout` deletes
-  the session row, invalidating that token immediately.
+- Sessions expire after 7 days (`sessions.expiresAt`); `POST /api/auth/logout` deletes the
+  session row immediately, invalidating that token right away.
+- `POST /api/auth/change-password` requires the correct current password and clears the
+  `passwordChangeRequired` flag (see "Default admin account" below).
+- `POST /api/auth/forgot-password` / `POST /api/auth/reset-password` implement a real
+  token-based reset: a one-time, 30-minute token is generated and — since no email provider is
+  configured — logged to the **server console** as a clickable link instead of actually being
+  emailed (`[password reset] user@x.com -> http://localhost:5173/reset-password?token=...`).
+  See "Remaining configuration" below for what a production deploy needs to wire up here.
 - You cannot cancel someone else's booking by guessing their booking id — you get the same
   `404` as for a booking that doesn't exist, so existence isn't leaked either.
 
-No endpoint ever returns `passwordHash` to a client (`authService.ts` strips it before
-building any response) — see `backend/tests/integration/auth.api.test.ts`.
+### Roles and the default admin account
+
+Two roles: `USER` (default, via signup) and `ADMIN`. **Every `/api/admin/*` route is guarded by
+`requireAdmin` middleware that checks the role from the verified session** — never a frontend
+check, never a hidden button. `backend/tests/integration/admin.api.test.ts` proves this
+directly: it calls every admin endpoint with a regular user's valid token and asserts `403` on
+all of them, plus `401` with no token at all.
+
+On first boot, `ensureDefaultAdmin()` (`backend/src/services/authService.ts`) idempotently
+creates:
+
+```
+Name:     Admin
+Email:    admin@gmail.com
+Password: admin@password    (passwordChangeRequired = true)
+Role:     ADMIN
+```
+
+Logging in with that password returns `passwordChangeRequired: true` in the user object; the
+frontend (`App.tsx`) renders **only** the forced "Set a new password" screen until
+`POST /api/auth/change-password` succeeds — every other route is unreachable in that state. On
+subsequent logins the flag is `false` and the admin goes straight to the dashboard, exactly as
+specified.
+
+### Account status
+
+Users have `status: ACTIVE | INACTIVE`. An admin toggles this via
+`POST /api/admin/users/:id/status` (frontend shows a confirmation dialog first). An `INACTIVE`
+account cannot log in (`403 ACCOUNT_INACTIVE`) and, if already logged in, loses access on their
+very next request (session lookup re-checks status live, not just at login). An admin cannot
+deactivate their own account (`userAdminService.ts` blocks it, to avoid a self-lockout).
+Deactivating a user never touches their booking history — bookings are keyed by `userId`, not
+gated by the user's current status.
+
+## Resource management
+
+Resources now carry: place name (`name`), landmark (`location`), "best for use", description,
+optional capacity, optional facilities (stored as JSON, e.g. `["Wi-Fi", "TV"]`), optional
+image URL, and a `status`: `AVAILABLE | MAINTENANCE | DISABLED`.
+
+- **Required-field validation is enforced on both ends.** The admin "Add resource" button is
+  disabled until place name, landmark, best-for-use, and description are all non-whitespace
+  (`AdminResources.tsx`); `resourceService.createResource`/`updateResource` re-validate the
+  same rule server-side and reject whitespace-only values with `400` — you cannot bypass the
+  frontend by calling the API directly (`admin.api.test.ts` proves this).
+- **`MAINTENANCE` and `DISABLED` both block new bookings** — `bookingService.createBooking`
+  checks `resource.status === 'AVAILABLE'` before the overlap check even runs, returning
+  `409 RESOURCE_UNAVAILABLE` with a status-specific message. Existing historical bookings for
+  that resource are untouched.
+- **Deleting a resource is refused if any booking (any status) references it** — `409
+  RESOURCE_HAS_BOOKINGS`, with the message pointing you to Disable instead. This is what keeps
+  the admin "who booked what" view from ever showing a dangling resource reference.
+- Users can search/filter resources by free text (`?q=`), status, minimum capacity, and
+  facilities; the resource card shows a 🟢/🟡/⚫ status tag, facility chips, and pins the "Book
+  this room" button to the card's bottom-left corner, per spec.
+
+Image support is a plain `imageUrl` text field (no upload widget/file storage — this project
+has no object storage configured; see "Remaining configuration").
+
+## Booking reference IDs & admin booking management
+
+Every booking gets a human-readable, sequential reference like `BK-2026-000001`
+(`nextBookingRef()` in `bookingService.ts`, backed by a `booking_counters(year, seq)` table).
+The increment happens **inside the same `BEGIN IMMEDIATE` transaction** as the overlap check
+and insert, so it's exactly as race-free as the no-double-booking guarantee itself — two
+concurrent bookings can never receive the same reference, and a rolled-back conflicting booking
+never burns a number for a booking that doesn't exist. It's shown in the booking confirmation,
+My Bookings, and every admin bookings view.
+
+Admins see every booking (`GET /api/admin/bookings`, joined with the user and resource
+they belong to — name, email, resource, date, times, status, created time), can search/filter
+by user, email, booking ID, resource, date, and status, can cancel **any** booking (a
+confirmation dialog in the UI, then `adminCancelBooking()` — which deliberately bypasses the
+1-minute-before-start cutoff a regular user is held to, since an admin override is exactly for
+the case where a normal user no longer can), and can export the current filtered view as CSV.
+
+## Audit log
+
+`backend/src/services/auditLog.ts` records: user registration, login success/failure/blocked
+(inactive account), password changes and resets, booking creation and cancellation (by the
+owner or an admin override), and every admin resource/user mutation. Never a password, hash, or
+reset token. Visible only via `GET /api/admin/audit-logs` (ADMIN-only, same middleware as every
+other admin route) — `admin.api.test.ts` confirms a regular user gets `403` there too, and that
+the returned entries never contain anything matching `passwordHash`.
 
 ## Testing
 
-`npm run test:backend` runs all of the following (62 tests):
+`npm run test:backend` runs all of the following (88 tests):
 
-- **`tests/integration/auth.api.test.ts`** — signup (success, duplicate email, weak password,
-  missing/invalid fields), login (success, case-insensitive email, wrong password, unknown
-  email — both give the same `401`), `GET /me`, and that logout actually invalidates the token.
+- **`tests/integration/admin.api.test.ts`** — the most important new suite: every admin
+  endpoint rejects a regular USER with `403` and an unauthenticated request with `401`;
+  activate/deactivate (including the self-lockout guard and that a deactivated user's *existing*
+  session stops working immediately); resource create/edit/status/delete including the
+  required-field and whitespace-only validation and the "can't delete a resource with bookings"
+  rule; setting a resource to `MAINTENANCE` actually blocks a booking attempt through the real
+  booking endpoint; the admin bookings view shows user+resource details and a valid
+  `BK-YYYY-NNNNNN` reference; admin cancellation bypasses the normal cutoff; CSV export; and
+  that the audit log captures booking creation/cancellation and is itself admin-only.
+
+- **`tests/integration/auth.api.test.ts`** — signup (success, duplicate email including
+  case-insensitively, weak password, mismatched confirmPassword, missing/invalid fields), login
+  (success, case-insensitive email, wrong password, unknown email — both give the same `401`,
+  a deactivated account gets `403`), `GET /me`, logout actually invalidates the token,
+  change-password (clears `passwordChangeRequired`, old password stops working, wrong current
+  password rejected), and the full forgot/reset-password flow (issued token works once, a
+  reused or expired token is rejected, an unknown email gets the same generic response as a
+  known one).
 
 - **`tests/unit/time.test.ts`** — the pure overlap function against the spec's exact boundary
   matrix (adjacent bookings don't overlap; the 4:00–5:00 / 4:30–5:30 / 4:00–4:30 / 5:30–6:30
@@ -283,10 +421,46 @@ the real UI form, a second independent browser context attempts the identical re
 and is shown the "Slot taken" panel (not a generic error), asserts no `@example.com` address
 leaks into the page, and saves a screenshot to `screenshots/slot-taken.png`.
 
+## Remaining configuration
+
+Everything above runs out of the box with zero external accounts. A few things are
+intentionally stubbed rather than wired to a real third-party service, since none was
+available/requested for this project — each is a small, isolated change if you need it later:
+
+- **Email delivery.** `POST /api/auth/forgot-password` logs the reset link to the server
+  console instead of emailing it (`authService.requestPasswordReset`). To go live, swap that
+  `console.log` for a call to whatever transactional email provider you use (SES, Postmark,
+  SendGrid, etc.) — the token generation/expiry/one-time-use logic around it doesn't change.
+  Set `FRONTEND_URL` in the backend's environment so the logged link points at the right host.
+- **Resource images.** `imageUrl` is a plain text field (paste an external URL) — there's no
+  file upload widget or object storage (S3/Cloudinary/etc.) wired up.
+- **Booking reminders.** "Starts in N minutes" is shown client-side in My Bookings for
+  anything within the next 30 minutes while that page is open — there's no push notification,
+  email, or background job, since that needs a real notification channel to be worth building.
+- **CSV only for export**, not Excel/PDF — per the brief's own preference, and to avoid pulling
+  in a spreadsheet/PDF-generation dependency for a feature that CSV already fully covers.
+- **No analytics charts** — the dashboard is numeric stat cards only, to avoid a new charting
+  dependency; the underlying data (`GET /api/admin/dashboard`) is there if you want to add one.
+- **Default admin credentials** (`admin@gmail.com` / `admin@password`) are meant to be rotated
+  immediately via the forced first-login change — don't leave them as-is past initial setup on
+  a real deployment.
+
 ## Definition of done — status
 
-All items in the original brief are implemented and covered by the tests above: resource
-listing, arbitrary-duration bookings, past/invalid-range rejection, adjacent-allowed /
-overlap-rejected, cancel-releases-slot, the 1-minute cancellation cutoff (both directions), UTC
-storage with local-timezone display, advisory-vs-authoritative availability, the database-level
-concurrency guarantee, and the real-browser conflict screenshot.
+All items in the original booking-correctness brief are implemented and covered by the tests
+above: resource listing, arbitrary-duration bookings, past/invalid-range rejection,
+adjacent-allowed / overlap-rejected, cancel-releases-slot, the 1-minute cancellation cutoff
+(both directions), UTC storage with local-timezone display, advisory-vs-authoritative
+availability, the database-level concurrency guarantee, and the real-browser conflict
+screenshot.
+
+The subsequent role/admin/resource-management upgrade (registration with confirm-password,
+case-insensitive duplicate-email protection, password visibility toggles, forgot/reset
+password, USER/ADMIN roles enforced server-side, the default admin + forced first-login
+password change, account activate/deactivate, resource CRUD with required-field validation and
+AVAILABLE/MAINTENANCE/DISABLED status, sequential booking reference IDs, admin dashboard/users/
+bookings/resources/audit-log views, admin booking cancellation with a confirmation dialog, CSV
+export, and the audit log itself) is implemented and covered the same way — see the sections
+above and `backend/tests/integration/admin.api.test.ts` in particular. All prior functionality
+(booking creation, the concurrency guarantee, cancellation, the "Slot taken" UX, timezone
+handling) was re-verified passing after this upgrade, not assumed to still work.

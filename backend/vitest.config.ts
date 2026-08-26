@@ -16,6 +16,14 @@ export default defineConfig({
     testTimeout: 20000,
     hookTimeout: 20000,
     fileParallelism: false,
+    // node:sqlite is still somewhat experimental; running every test file in
+    // its own worker fork occasionally crashed one under load. Pinning
+    // everything to a single worker is more stable and barely slower given
+    // fileParallelism is already off.
+    pool: "forks",
+    maxWorkers: 1,
+    minWorkers: 1,
+    isolate: false,
     server: {
       deps: {
         external: ["node:sqlite"]
