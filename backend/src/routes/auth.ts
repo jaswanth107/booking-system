@@ -58,11 +58,13 @@ export function authRouter(db: DatabaseSync): Router {
   // first-login change for the default admin (passwordChangeRequired flag).
   router.post("/change-password", requireAuth(db), async (req, res, next) => {
     try {
-      const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
+      const { currentPassword, newPassword, confirmPassword, name, email } = req.body ?? {};
       const user = await changePassword(db, (req as AuthedRequest).userId, {
         currentPassword,
         newPassword,
-        confirmPassword
+        confirmPassword,
+        name,
+        email
       });
       res.json({ user });
     } catch (err) {

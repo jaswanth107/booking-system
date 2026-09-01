@@ -102,10 +102,21 @@ export const api = {
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   me: () => request<{ user: User }>("/auth/me"),
-  changePassword: (currentPassword: string, newPassword: string, confirmPassword: string) =>
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+    profile?: { name: string; email: string }
+  ) =>
     request<{ user: User }>("/auth/change-password", {
       method: "POST",
-      body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
+      body: JSON.stringify({
+        currentPassword,
+        newPassword,
+        confirmPassword,
+        name: profile?.name,
+        email: profile?.email
+      })
     }),
   forgotPassword: (email: string) =>
     request<{ message: string }>("/auth/forgot-password", {

@@ -9,6 +9,8 @@ export function ChangePasswordPage() {
   const navigate = useNavigate();
   const forced = Boolean(user?.passwordChangeRequired);
 
+  const [name, setName] = useState(user?.name ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -24,7 +26,12 @@ export function ChangePasswordPage() {
     }
     setSubmitting(true);
     try {
-      await api.changePassword(currentPassword, newPassword, confirmPassword);
+      await api.changePassword(
+        currentPassword,
+        newPassword,
+        confirmPassword,
+        forced ? { name, email } : undefined
+      );
       await refreshUser();
       navigate(user?.role === "ADMIN" ? "/admin" : "/");
     } catch (err) {
@@ -40,10 +47,37 @@ export function ChangePasswordPage() {
         <h1>{forced ? "Set a new password" : "Change password"}</h1>
         {forced && (
           <p className="notice notice-warning">
-            This is your first login with the default admin password. You must set a new password before continuing.
+            This is your first login with the default admin password. Set your own name, email, and password before
+            continuing — you'll use these to log in from now on.
           </p>
         )}
         <form className="booking-form" onSubmit={handleSubmit}>
+          {forced && (
+            <>
+              <label>
+                Name
+                <input
+                  type="text"
+                  data-testid="name-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoComplete="name"
+                  required
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  type="email"
+                  data-testid="email-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  required
+                />
+              </label>
+            </>
+          )}
           <label>
             Current password
             <PasswordInput

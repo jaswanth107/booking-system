@@ -165,7 +165,7 @@ export function getPublicUserById(db: DatabaseSync, id: string): PublicUser | un
 export async function changePassword(
   db: DatabaseSync,
   userId: string,
-  input: { currentPassword: unknown; newPassword: unknown; confirmPassword: unknown }
+  input: { currentPassword: unknown; newPassword: unknown; confirmPassword: unknown; name?: unknown; email?: unknown }
 ): Promise<PublicUser> {
   const user = getUserById(db, userId);
   if (!user) throw Errors.notFound("User");
@@ -180,11 +180,37 @@ export async function changePassword(
   validatePasswordPolicy(newPassword);
   if (newPassword !== confirmPassword) throw Errors.passwordMismatch();
 
-  const passwordHash = await hashPassword(newPassword);
-  db.prepare("UPDATE users SET passwordHash = ?, passwordChangeRequired = 0 WHERE id = ?").run(passwordHash, userId);
-  logAction(db, { actorId: userId, actorEmail: user.email, action: "PASSWORD_CHANGED", entityType: "user", entityId: userId });
+  let name = user.name;
+  let email = user.email;
 
-  return toPublicUser({ ...user, passwordHash, passwordChangeRequired: 0 });
+  // On the forced first-login change, the default admin also claims their
+  // own name + email here, so every later login uses their own identity
+  // (email + the password they just set) instead of the shared default
+  // admin@gmail.com account. Required only in this forced case — a regular
+  // "change my password" call doesn't touch profile fields.
+  if (user.passwordChangeRequired) {
+    const inputName = typeof input.name === "string" ? input.name.trim() : "";
+    const inputEmail = normalizeEmail(input.email);
+    if (!inputName) throw Errors.invalidInput("Name is required.");
+    if (!inputEmail || !EMAIL_RE.test(inputEmail)) throw Errors.invalidInput("A valid email is required.");
+    if (inputEmail !== user.email) {
+      const existing = getUserByEmail(db, inputEmail);
+      if (existing && existing.id !== userId) throw Errors.emailTaken();
+    }
+    name = inputName;
+    email = inputEmail;
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  db.prepare("UPDATE users SET name = ?, email = ?, passwordHash = ?, passwordChangeRequired = 0 WHERE id = ?").run(
+    name,
+    email,
+    passwordHash,
+    userId
+  );
+  logAction(db, { actorId: userId, actorEmail: email, action: "PASSWORD_CHANGED", entityType: "user", entityId: userId });
+
+  return toPublicUser({ ...user, name, email, passwordHash, passwordChangeRequired: 0 });
 }
 
 /**

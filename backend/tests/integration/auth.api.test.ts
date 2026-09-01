@@ -3,6 +3,7 @@ import request from "supertest";
 import type { Express } from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { buildTestApp, teardownTestDb } from "../helpers.js";
+import { ensureDefaultAdmin } from "../../src/services/authService.js";
 
 let app: Express;
 let db: DatabaseSync;
@@ -176,6 +177,57 @@ describe("POST /api/auth/change-password", () => {
       .send({ currentPassword: "wrong", newPassword: "brandNewPass1", confirmPassword: "brandNewPass1" });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("INCORRECT_PASSWORD");
+  });
+
+  it("on the forced first-login change, lets the default admin claim their own name/email and log in as that identity afterward", async () => {
+    await ensureDefaultAdmin(db);
+
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@gmail.com", password: "admin@password" });
+    expect(login.status).toBe(200);
+    expect(login.body.user.passwordChangeRequired).toBe(1);
+
+    const change = await request(app)
+      .post("/api/auth/change-password")
+      .set("Authorization", `Bearer ${login.body.token}`)
+      .send({
+        currentPassword: "admin@password",
+        newPassword: "myOwnPass123",
+        confirmPassword: "myOwnPass123",
+        name: "Priya Admin",
+        email: "priya@example.com"
+      });
+    expect(change.status).toBe(200);
+    expect(change.body.user.name).toBe("Priya Admin");
+    expect(change.body.user.email).toBe("priya@example.com");
+    expect(change.body.user.role).toBe("ADMIN");
+    expect(change.body.user.passwordChangeRequired).toBe(0);
+
+    const newLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "priya@example.com", password: "myOwnPass123" });
+    expect(newLogin.status).toBe(200);
+    expect(newLogin.body.user.role).toBe("ADMIN");
+
+    const oldLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@gmail.com", password: "admin@password" });
+    expect(oldLogin.status).toBe(401);
+  });
+
+  it("requires name and email on the forced first-login change", async () => {
+    await ensureDefaultAdmin(db);
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@gmail.com", password: "admin@password" });
+
+    const res = await request(app)
+      .post("/api/auth/change-password")
+      .set("Authorization", `Bearer ${login.body.token}`)
+      .send({ currentPassword: "admin@password", newPassword: "myOwnPass123", confirmPassword: "myOwnPass123" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("INVALID_INPUT");
   });
 });
 
