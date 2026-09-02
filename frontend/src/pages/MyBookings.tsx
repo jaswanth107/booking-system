@@ -76,7 +76,8 @@ export function MyBookings() {
 
       {soonest && (
         <p className="notice notice-warning" data-testid="upcoming-reminder">
-          Your booking ({soonest.b.bookingRef}) starts in {Math.ceil(soonest.msUntil / 60_000)} minute
+          Your booking for {soonest.b.resourceName} ({soonest.b.bookingRef}) starts in{" "}
+          {Math.ceil(soonest.msUntil / 60_000)} minute
           {Math.ceil(soonest.msUntil / 60_000) === 1 ? "" : "s"}.
         </p>
       )}
@@ -105,8 +106,11 @@ export function MyBookings() {
           return (
             <li key={b.id} className="booking-item" data-testid="booking-item">
               <div>
-                <strong>{formatInTimeZone(b.startAt, timeZone)}</strong> —{" "}
-                {formatInTimeZone(b.endAt, timeZone)}
+                <strong>{b.resourceName}</strong>
+                <div className="resource-meta">{b.resourceLocation}</div>
+                <div>
+                  {formatInTimeZone(b.startAt, timeZone)} — {formatInTimeZone(b.endAt, timeZone)}
+                </div>
                 <div className="resource-meta">
                   {b.bookingRef} · Status: {b.status}
                 </div>

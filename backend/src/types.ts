@@ -65,6 +65,11 @@ export interface Booking {
   cancelledBy: string | null;
 }
 
+export interface BookingWithResource extends Booking {
+  resourceName: string;
+  resourceLocation: string;
+}
+
 export interface AuditLogEntry {
   id: string;
   actorId: string | null;

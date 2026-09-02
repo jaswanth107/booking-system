@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { v4 as uuidv4 } from "uuid";
-import type { Booking } from "../types.js";
+import type { Booking, BookingWithResource } from "../types.js";
 import { Errors } from "./errors.js";
 import { CANCELLATION_CUTOFF_MS, parseTimestamp, toUtcIso } from "../utils/time.js";
 import { getResourceById } from "./resourceService.js";
@@ -59,22 +59,28 @@ export function getBookingById(db: DatabaseSync, id: string): Booking | undefine
 export function listBookings(
   db: DatabaseSync,
   filters: { userId?: string; resourceId?: string } = {}
-): Booking[] {
+): BookingWithResource[] {
   const clauses: string[] = [];
   const params: Record<string, string> = {};
   if (filters.userId) {
-    clauses.push("userId = @userId");
+    clauses.push("bookings.userId = @userId");
     params.userId = filters.userId;
   }
   if (filters.resourceId) {
-    clauses.push("resourceId = @resourceId");
+    clauses.push("bookings.resourceId = @resourceId");
     params.resourceId = filters.resourceId;
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = db
-    .prepare(`SELECT * FROM bookings ${where} ORDER BY startAt DESC`)
-    .all(params) as unknown as Booking[];
-  return rows.map(rowToBooking);
+    .prepare(
+      `SELECT bookings.*, resources.name as resourceName, resources.location as resourceLocation
+       FROM bookings
+       JOIN resources ON resources.id = bookings.resourceId
+       ${where}
+       ORDER BY bookings.startAt DESC`
+    )
+    .all(params) as unknown as BookingWithResource[];
+  return rows;
 }
 
 /**

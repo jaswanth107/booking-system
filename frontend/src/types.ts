@@ -34,6 +34,8 @@ export interface Booking {
   id: string;
   bookingRef: string;
   resourceId: string;
+  resourceName: string;
+  resourceLocation: string;
   userId: string;
   startAt: string; // UTC ISO-8601
   endAt: string; // UTC ISO-8601
