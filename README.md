@@ -34,7 +34,7 @@ Open the app and you'll land on a login screen: pick **New user** to sign up wit
 and password (with confirmation), or **Existing user** to log in with an email/password you
 already created — there's also a "Forgot password?" link. Regular accounts aren't pre-seeded —
 everyone creates their own, and each user only ever sees and manages their own bookings. The
-one exception is a seeded **default admin account** (`admin@gmail.com` / `admin@password`) —
+one exception is a seeded **default admin account** (`admin@gmail.com` / `password123`) —
 log in with it and you'll immediately be forced to set a new password before doing anything
 else. See "Roles and the default admin account" below.
 
@@ -302,7 +302,7 @@ creates:
 ```
 Name:     Admin
 Email:    admin@gmail.com
-Password: admin@password    (passwordChangeRequired = true)
+Password: password123    (passwordChangeRequired = true)
 Role:     ADMIN
 ```
 
@@ -441,7 +441,7 @@ available/requested for this project — each is a small, isolated change if you
   in a spreadsheet/PDF-generation dependency for a feature that CSV already fully covers.
 - **No analytics charts** — the dashboard is numeric stat cards only, to avoid a new charting
   dependency; the underlying data (`GET /api/admin/dashboard`) is there if you want to add one.
-- **Default admin credentials** (`admin@gmail.com` / `admin@password`) are meant to be rotated
+- **Default admin credentials** (`admin@gmail.com` / `password123`) are meant to be rotated
   immediately via the forced first-login change — don't leave them as-is past initial setup on
   a real deployment.
 

@@ -213,7 +213,7 @@ export async function changePassword(
   // Self-service admin bootstrap: the shared admin@gmail.com account is a
   // standing invite, not a one-time credential. As soon as whoever just
   // claimed it moves off that email, immediately reseed a fresh
-  // admin@gmail.com/admin@password account (idempotent — no-ops if one
+  // admin@gmail.com/password123 account (idempotent — no-ops if one
   // already exists) so the next person can claim an admin slot the same
   // way, without waiting for a server restart.
   if (user.role === "ADMIN" && user.email === DEFAULT_ADMIN_EMAIL && email !== DEFAULT_ADMIN_EMAIL) {
@@ -306,7 +306,7 @@ export async function resetPassword(
 }
 
 const DEFAULT_ADMIN_EMAIL = "admin@gmail.com";
-const DEFAULT_ADMIN_PASSWORD = "admin@password";
+const DEFAULT_ADMIN_PASSWORD = "password123";
 
 /** Idempotent: creates the default admin account once, on first boot. */
 export async function ensureDefaultAdmin(db: DatabaseSync): Promise<void> {

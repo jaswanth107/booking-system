@@ -184,7 +184,7 @@ describe("POST /api/auth/change-password", () => {
 
     const login = await request(app)
       .post("/api/auth/login")
-      .send({ email: "admin@gmail.com", password: "admin@password" });
+      .send({ email: "admin@gmail.com", password: "password123" });
     expect(login.status).toBe(200);
     expect(login.body.user.passwordChangeRequired).toBe(1);
 
@@ -192,7 +192,7 @@ describe("POST /api/auth/change-password", () => {
       .post("/api/auth/change-password")
       .set("Authorization", `Bearer ${login.body.token}`)
       .send({
-        currentPassword: "admin@password",
+        currentPassword: "password123",
         newPassword: "myOwnPass123",
         confirmPassword: "myOwnPass123",
         name: "Priya Admin",
@@ -212,10 +212,10 @@ describe("POST /api/auth/change-password", () => {
 
     // The default admin bootstrap is a standing invite, not a one-time
     // credential: as soon as Priya claims it, a fresh admin@gmail.com /
-    // admin@password account is reseeded so the next admin can claim it too.
+    // password123 account is reseeded so the next admin can claim it too.
     const reseededLogin = await request(app)
       .post("/api/auth/login")
-      .send({ email: "admin@gmail.com", password: "admin@password" });
+      .send({ email: "admin@gmail.com", password: "password123" });
     expect(reseededLogin.status).toBe(200);
     expect(reseededLogin.body.user.role).toBe("ADMIN");
     expect(reseededLogin.body.user.passwordChangeRequired).toBe(1);
@@ -227,12 +227,12 @@ describe("POST /api/auth/change-password", () => {
 
     const firstLogin = await request(app)
       .post("/api/auth/login")
-      .send({ email: "admin@gmail.com", password: "admin@password" });
+      .send({ email: "admin@gmail.com", password: "password123" });
     await request(app)
       .post("/api/auth/change-password")
       .set("Authorization", `Bearer ${firstLogin.body.token}`)
       .send({
-        currentPassword: "admin@password",
+        currentPassword: "password123",
         newPassword: "firstPass123",
         confirmPassword: "firstPass123",
         name: "First Admin",
@@ -241,14 +241,14 @@ describe("POST /api/auth/change-password", () => {
 
     const secondLogin = await request(app)
       .post("/api/auth/login")
-      .send({ email: "admin@gmail.com", password: "admin@password" });
+      .send({ email: "admin@gmail.com", password: "password123" });
     expect(secondLogin.status).toBe(200);
 
     const secondChange = await request(app)
       .post("/api/auth/change-password")
       .set("Authorization", `Bearer ${secondLogin.body.token}`)
       .send({
-        currentPassword: "admin@password",
+        currentPassword: "password123",
         newPassword: "secondPass123",
         confirmPassword: "secondPass123",
         name: "Second Admin",
@@ -268,12 +268,12 @@ describe("POST /api/auth/change-password", () => {
     await ensureDefaultAdmin(db);
     const login = await request(app)
       .post("/api/auth/login")
-      .send({ email: "admin@gmail.com", password: "admin@password" });
+      .send({ email: "admin@gmail.com", password: "password123" });
 
     const res = await request(app)
       .post("/api/auth/change-password")
       .set("Authorization", `Bearer ${login.body.token}`)
-      .send({ currentPassword: "admin@password", newPassword: "myOwnPass123", confirmPassword: "myOwnPass123" });
+      .send({ currentPassword: "password123", newPassword: "myOwnPass123", confirmPassword: "myOwnPass123" });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("INVALID_INPUT");
   });
