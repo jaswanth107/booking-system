@@ -210,10 +210,58 @@ describe("POST /api/auth/change-password", () => {
     expect(newLogin.status).toBe(200);
     expect(newLogin.body.user.role).toBe("ADMIN");
 
-    const oldLogin = await request(app)
+    // The default admin bootstrap is a standing invite, not a one-time
+    // credential: as soon as Priya claims it, a fresh admin@gmail.com /
+    // admin@password account is reseeded so the next admin can claim it too.
+    const reseededLogin = await request(app)
       .post("/api/auth/login")
       .send({ email: "admin@gmail.com", password: "admin@password" });
-    expect(oldLogin.status).toBe(401);
+    expect(reseededLogin.status).toBe(200);
+    expect(reseededLogin.body.user.role).toBe("ADMIN");
+    expect(reseededLogin.body.user.passwordChangeRequired).toBe(1);
+    expect(reseededLogin.body.user.id).not.toBe(change.body.user.id);
+  });
+
+  it("lets a second person claim a freshly reseeded default admin account after the first claims theirs", async () => {
+    await ensureDefaultAdmin(db);
+
+    const firstLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@gmail.com", password: "admin@password" });
+    await request(app)
+      .post("/api/auth/change-password")
+      .set("Authorization", `Bearer ${firstLogin.body.token}`)
+      .send({
+        currentPassword: "admin@password",
+        newPassword: "firstPass123",
+        confirmPassword: "firstPass123",
+        name: "First Admin",
+        email: "first-admin@example.com"
+      });
+
+    const secondLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@gmail.com", password: "admin@password" });
+    expect(secondLogin.status).toBe(200);
+
+    const secondChange = await request(app)
+      .post("/api/auth/change-password")
+      .set("Authorization", `Bearer ${secondLogin.body.token}`)
+      .send({
+        currentPassword: "admin@password",
+        newPassword: "secondPass123",
+        confirmPassword: "secondPass123",
+        name: "Second Admin",
+        email: "second-admin@example.com"
+      });
+    expect(secondChange.status).toBe(200);
+    expect(secondChange.body.user.role).toBe("ADMIN");
+
+    const firstStillWorks = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "first-admin@example.com", password: "firstPass123" });
+    expect(firstStillWorks.status).toBe(200);
+    expect(firstStillWorks.body.user.role).toBe("ADMIN");
   });
 
   it("requires name and email on the forced first-login change", async () => {

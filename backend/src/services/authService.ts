@@ -210,6 +210,16 @@ export async function changePassword(
   );
   logAction(db, { actorId: userId, actorEmail: email, action: "PASSWORD_CHANGED", entityType: "user", entityId: userId });
 
+  // Self-service admin bootstrap: the shared admin@gmail.com account is a
+  // standing invite, not a one-time credential. As soon as whoever just
+  // claimed it moves off that email, immediately reseed a fresh
+  // admin@gmail.com/admin@password account (idempotent — no-ops if one
+  // already exists) so the next person can claim an admin slot the same
+  // way, without waiting for a server restart.
+  if (user.role === "ADMIN" && user.email === DEFAULT_ADMIN_EMAIL && email !== DEFAULT_ADMIN_EMAIL) {
+    await ensureDefaultAdmin(db);
+  }
+
   return toPublicUser({ ...user, name, email, passwordHash, passwordChangeRequired: 0 });
 }
 
