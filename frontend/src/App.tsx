@@ -45,8 +45,6 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar isAdmin={isAdmin} user={user} logout={logout} />
-
       <main className="app-main">
         <div className="app-topbar">
           <label className="timezone-control">
@@ -81,6 +79,8 @@ export default function App() {
           )}
         </Routes>
       </main>
+
+      <Sidebar isAdmin={isAdmin} user={user} logout={logout} />
     </div>
   );
 }
